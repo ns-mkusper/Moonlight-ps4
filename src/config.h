@@ -34,6 +34,13 @@ typedef struct {
     bool dec_fb_garlic;     // force decoder framebuffer to WC_GARLIC (skip ONION alias)
     int bgra_workers;       // NV12->BGRA convert threads (1..6)
     int bgra_nt;            // -1 auto, 0 cached stores, 1 streaming stores
+    /* Latency tuning (see docs/latency.md). */
+    int input_poll_us;      // pad poll period on a dedicated thread; 0 = legacy 8 ms main-loop poll
+    int ycbcr_buffers;      // YCbCr scanout buffers (1..3); 3 lets decode overlap the vblank wait
+    bool ycbcr_wait_flip;   // block the decode thread until each YCbCr flip is on screen
+    bool flip_hsync;        // flip on hsync (tearing) instead of vsync: ~half a refresh less wait
+    bool direct_submit;     // CAPABILITY_DIRECT_SUBMIT: decode on the receive thread, no DU queue
+    bool rfi;               // CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC instead of IDR on loss
 } app_config_t;
 
 void config_set_defaults(app_config_t *cfg);

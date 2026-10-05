@@ -26,7 +26,7 @@ Playable client for jailbroken PS4 (GoldHEN / FW 9.00 validated):
 - [ ] mDNS host discovery
 - [ ] Native YCbCr/NV12 presentation on `sceVideoOut`
 
-Full port plan and longer backlog: [PLAN.md](PLAN.md). Validation notes: [docs/CONSOLE_VALIDATE.md](docs/CONSOLE_VALIDATE.md).
+Full port plan and longer backlog: [PLAN.md](PLAN.md). Validation notes: [docs/CONSOLE_VALIDATE.md](docs/CONSOLE_VALIDATE.md). Latency settings: [docs/latency.md](docs/latency.md).
 
 ## Requirements (development)
 

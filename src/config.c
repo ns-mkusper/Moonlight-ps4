@@ -43,6 +43,12 @@ void config_set_defaults(app_config_t *cfg) {
     cfg->dec_fb_garlic = false;
     cfg->bgra_workers = 4;
     cfg->bgra_nt = -1;
+    cfg->input_poll_us = 1000;
+    cfg->ycbcr_buffers = 2;
+    cfg->ycbcr_wait_flip = true;
+    cfg->flip_hsync = false;
+    cfg->direct_submit = false;
+    cfg->rfi = false;
     snprintf(cfg->app_name, sizeof(cfg->app_name), "Steam Big Picture");
 }
 
@@ -161,6 +167,18 @@ int config_load(app_config_t *cfg, const char *dir) {
             cfg->bgra_workers = atoi(val);
         else if (!strcmp(key, "bgra_nt"))
             cfg->bgra_nt = atoi(val);
+        else if (!strcmp(key, "input_poll_us"))
+            cfg->input_poll_us = atoi(val);
+        else if (!strcmp(key, "ycbcr_buffers"))
+            cfg->ycbcr_buffers = atoi(val);
+        else if (!strcmp(key, "ycbcr_wait_flip"))
+            cfg->ycbcr_wait_flip = parse_bool(val);
+        else if (!strcmp(key, "flip_hsync"))
+            cfg->flip_hsync = parse_bool(val);
+        else if (!strcmp(key, "direct_submit"))
+            cfg->direct_submit = parse_bool(val);
+        else if (!strcmp(key, "rfi"))
+            cfg->rfi = parse_bool(val);
         else
             LOGW("config: clave desconocida '%s'", key);
     }
@@ -183,6 +201,19 @@ int config_load(app_config_t *cfg, const char *dir) {
         cfg->dec_au_onion = true;
     }
 
+    if (cfg->input_poll_us < 0)
+        cfg->input_poll_us = 0;
+    if (cfg->input_poll_us > 0 && cfg->input_poll_us < 250)
+        cfg->input_poll_us = 250;
+    if (cfg->ycbcr_buffers < 1)
+        cfg->ycbcr_buffers = 1;
+    if (cfg->ycbcr_buffers > 3)
+        cfg->ycbcr_buffers = 3;
+
+    LOGI("config: latency input_poll_us=%d ycbcr_buffers=%d ycbcr_wait_flip=%d "
+         "flip_hsync=%d direct_submit=%d rfi=%d",
+         cfg->input_poll_us, cfg->ycbcr_buffers, cfg->ycbcr_wait_flip,
+         cfg->flip_hsync, cfg->direct_submit, cfg->rfi);
     LOGI("config: host=%s app=%s debug=%s %dx%d@%d br=%d pkt=%d hw=%d ycbcr=%d file_log=%d",
          cfg->host, cfg->app_name, cfg->debug_host,
          cfg->stream.width, cfg->stream.height, cfg->stream.fps, cfg->stream.bitrate,
@@ -224,7 +255,13 @@ int config_save(const app_config_t *cfg, const char *dir) {
             "dec_au_onion = %s\n"
             "dec_fb_garlic = %s\n"
             "bgra_workers = %d\n"
-            "bgra_nt = %d\n",
+            "bgra_nt = %d\n"
+            "input_poll_us = %d\n"
+            "ycbcr_buffers = %d\n"
+            "ycbcr_wait_flip = %s\n"
+            "flip_hsync = %s\n"
+            "direct_submit = %s\n"
+            "rfi = %s\n",
             cfg->host, cfg->app_name, cfg->debug_host,
             cfg->stream.width, cfg->stream.height, cfg->stream.fps, cfg->stream.bitrate,
             cfg->stream.packetSize,
@@ -238,7 +275,12 @@ int config_save(const app_config_t *cfg, const char *dir) {
             cfg->dec_pipeline_depth, cfg->dec_thread_prio, cfg->slices_per_frame,
             cfg->dec_au_onion ? "true" : "false",
             cfg->dec_fb_garlic ? "true" : "false",
-            cfg->bgra_workers, cfg->bgra_nt);
+            cfg->bgra_workers, cfg->bgra_nt,
+            cfg->input_poll_us, cfg->ycbcr_buffers,
+            cfg->ycbcr_wait_flip ? "true" : "false",
+            cfg->flip_hsync ? "true" : "false",
+            cfg->direct_submit ? "true" : "false",
+            cfg->rfi ? "true" : "false");
     fclose(f);
     return 0;
 }
