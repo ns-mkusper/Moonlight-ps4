@@ -8,6 +8,22 @@
 #define CONFIG_MAX_HOST 128
 #define CONFIG_MAX_APP  128
 
+/* User-facing latency presets (SETTINGS → Latency mode). Each mode implies
+ * values for direct_submit, ycbcr_buffers, ycbcr_wait_flip and flip_hsync;
+ * those keys written explicitly in moonlight.ini override the mode. */
+typedef enum {
+    LATENCY_STANDARD = 0, /* validated defaults */
+    LATENCY_LOW = 1,      /* direct submit, YCbCr triple buffering without flip wait */
+    LATENCY_LOWEST = 2,   /* LOW + hsync flips (tearing) */
+    LATENCY_MODE_COUNT
+} latency_mode_t;
+
+/* Bits in app_config_t.latency_overrides: mode-controlled keys that the ini set explicitly. */
+#define LAT_OVR_DIRECT_SUBMIT   0x1u
+#define LAT_OVR_YCBCR_BUFFERS   0x2u
+#define LAT_OVR_YCBCR_WAIT_FLIP 0x4u
+#define LAT_OVR_FLIP_HSYNC      0x8u
+
 typedef struct {
     STREAM_CONFIGURATION stream; // embedded: width/height/fps/bitrate/...
 
@@ -34,7 +50,10 @@ typedef struct {
     bool dec_fb_garlic;     // force decoder framebuffer to WC_GARLIC (skip ONION alias)
     int bgra_workers;       // NV12->BGRA convert threads (1..6)
     int bgra_nt;            // -1 auto, 0 cached stores, 1 streaming stores
-    /* Latency tuning (see docs/latency.md). */
+    /* Latency tuning (see docs/latency.md). latency_mode is the menu setting;
+     * the knobs below are derived from it unless overridden in the ini. */
+    int latency_mode;           // latency_mode_t
+    unsigned latency_overrides; // LAT_OVR_* bits, runtime only
     int input_poll_us;      // pad poll period on a dedicated thread; 0 = legacy 8 ms main-loop poll
     int ycbcr_buffers;      // YCbCr scanout buffers (1..3); 3 lets decode overlap the vblank wait
     bool ycbcr_wait_flip;   // block the decode thread until each YCbCr flip is on screen
@@ -47,3 +66,10 @@ void config_set_defaults(app_config_t *cfg);
 void config_ensure_dir(const char *dir);
 int config_load(app_config_t *cfg, const char *dir);
 int config_save(const app_config_t *cfg, const char *dir);
+
+/* Set the mode-controlled knobs from cfg->latency_mode, keeping any knob
+ * whose LAT_OVR_* bit is set in cfg->latency_overrides. */
+void config_apply_latency_mode(app_config_t *cfg);
+/* "standard" / "low" / "lowest" (ini value) and the menu label. */
+const char *config_latency_mode_key(int mode);
+const char *config_latency_mode_label(int mode);

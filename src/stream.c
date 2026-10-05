@@ -215,10 +215,11 @@ static int stream_play(app_config_t *cfg) {
         LOGE("app not found: '%s'", cfg->app_name);
         return -1;
     }
-    LOGI("launch app_id=%d name='%s' %dx%d@%d bitrate=%d sops=%d localAudio=%d currentGame=%d",
+    LOGI("launch app_id=%d name='%s' %dx%d@%d bitrate=%d sops=%d localAudio=%d currentGame=%d latency=%s%s",
          app_id, cfg->app_name, cfg->stream.width, cfg->stream.height,
          cfg->stream.fps, cfg->stream.bitrate, cfg->sops, cfg->local_audio,
-         s_server.currentGame);
+         s_server.currentGame, config_latency_mode_key(cfg->latency_mode),
+         cfg->latency_overrides ? " (custom)" : "");
 
     /* If Sunshine already has another app active, cancel before launching. */
     if (s_server.currentGame != 0 && s_server.currentGame != app_id) {
