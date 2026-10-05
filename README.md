@@ -19,7 +19,7 @@ Playable client for jailbroken PS4 (GoldHEN / FW 9.00 validated):
 - [x] On-console UI (APPS / SETTINGS + on-screen keyboard) and INI config
 - [x] Installable `.pkg` (`CATEGORY=gd`)
 - [x] Optional performance overlay and Videodec2 / BGRA tuning knobs
-- [x] Latency mode in SETTINGS (Standard / Low / Lowest) and a 1 ms controller poll thread ([docs/latency.md](docs/latency.md))
+- [x] Latency mode in SETTINGS (Standard / Low / Lowest) and a 1 ms controller poll thread
 
 ### TODO
 
@@ -27,7 +27,7 @@ Playable client for jailbroken PS4 (GoldHEN / FW 9.00 validated):
 - [ ] mDNS host discovery
 - [ ] Native YCbCr/NV12 presentation on `sceVideoOut`
 
-Full port plan and longer backlog: [PLAN.md](PLAN.md). Validation notes: [docs/CONSOLE_VALIDATE.md](docs/CONSOLE_VALIDATE.md). Latency settings: [docs/latency.md](docs/latency.md).
+Full port plan and longer backlog: [PLAN.md](PLAN.md). Validation notes: [docs/CONSOLE_VALIDATE.md](docs/CONSOLE_VALIDATE.md).
 
 ## Requirements (development)
 

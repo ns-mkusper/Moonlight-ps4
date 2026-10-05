@@ -50,16 +50,21 @@ typedef struct {
     bool dec_fb_garlic;     // force decoder framebuffer to WC_GARLIC (skip ONION alias)
     int bgra_workers;       // NV12->BGRA convert threads (1..6)
     int bgra_nt;            // -1 auto, 0 cached stores, 1 streaming stores
-    /* Latency tuning (see docs/latency.md). latency_mode is the menu setting;
-     * the knobs below are derived from it unless overridden in the ini. */
+    /* Latency tuning. latency_mode is the SETTINGS → Latency mode value; the
+     * four mode-controlled knobs (direct_submit, ycbcr_buffers,
+     * ycbcr_wait_flip, flip_hsync) are derived from it. Any of them present
+     * in moonlight.ini overrides the mode (the menu then shows "(custom)"),
+     * and picking a mode in the menu clears those overrides. config_save
+     * writes a knob only when it differs from what the mode or default
+     * implies, so future default changes still reach existing files. */
     int latency_mode;           // latency_mode_t
     unsigned latency_overrides; // LAT_OVR_* bits, runtime only
-    int input_poll_us;      // pad poll period on a dedicated thread; 0 = legacy 8 ms main-loop poll
+    int input_poll_us;      // pad poll period (us) on a dedicated thread; 0 = legacy 8 ms main-loop poll; clamped to >= 250
     int ycbcr_buffers;      // YCbCr scanout buffers (1..3); 3 lets decode overlap the vblank wait
     bool ycbcr_wait_flip;   // block the decode thread until each YCbCr flip is on screen
     bool flip_hsync;        // flip on hsync (tearing) instead of vsync: ~half a refresh less wait
     bool direct_submit;     // CAPABILITY_DIRECT_SUBMIT: decode on the receive thread, no DU queue
-    bool rfi;               // CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC instead of IDR on loss
+    bool rfi;               // experimental, ini only: CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC instead of IDR on loss
 } app_config_t;
 
 void config_set_defaults(app_config_t *cfg);
