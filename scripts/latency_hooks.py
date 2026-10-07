@@ -10,6 +10,7 @@ Pair "flash" with a camera on the TV and "tap" with a capture of the game
 to get panel and end-to-end latency on the laptop's own clock.
 """
 import argparse
+import re
 import socket
 import statistics
 import time
@@ -19,10 +20,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("host")
     ap.add_argument("cmd", choices=["ping", "flash", "tap"])
-    ap.add_argument("-p", "--port", type=int, default=48100)
+    ap.add_argument("-p", "--port", default="48100",
+                    help="hook port, or 'auto' to read it from the client's UDP log")
+    ap.add_argument("--log", default="/tmp/ps4_moonlight_udp.log",
+                    help="client log for --port auto")
     ap.add_argument("-n", type=int, default=10)
     ap.add_argument("--gap", type=float, default=0.5, help="seconds between commands")
     a = ap.parse_args()
+    if a.port == "auto":
+        ports = re.findall(r"TEST HOOKS ON, udp :(\d+)", open(a.log, errors="replace").read())
+        if not ports:
+            raise SystemExit(f"no 'TEST HOOKS ON' line in {a.log}")
+        a.port = ports[-1]
+    a.port = int(a.port)
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(1.0)

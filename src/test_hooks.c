@@ -95,11 +95,20 @@ int test_hooks_start(int port, int tap_ms) {
     a.sin_port = htons((uint16_t)port);
     a.sin_addr.s_addr = htonl(INADDR_ANY);
     if (bind(s_sock, (struct sockaddr *)&a, sizeof(a)) != 0) {
-        LOGE("hooks: bind :%d errno=%d", port, errno);
-        close(s_sock);
-        s_sock = -1;
-        return -1;
+        /* The PS4 refuses some fixed ports (EACCES for 48100 on hardware);
+         * take any free port instead and report it in the log line below. */
+        LOGW("hooks: bind :%d errno=%d; using a free port", port, errno);
+        a.sin_port = 0;
+        if (bind(s_sock, (struct sockaddr *)&a, sizeof(a)) != 0) {
+            LOGE("hooks: bind :0 errno=%d", errno);
+            close(s_sock);
+            s_sock = -1;
+            return -1;
+        }
     }
+    socklen_t alen = sizeof(a);
+    if (getsockname(s_sock, (struct sockaddr *)&a, &alen) == 0)
+        port = ntohs(a.sin_port);
     atomic_store(&s_flash_cmd_us, 0);
     atomic_store(&s_tap_cmd_us, 0);
     atomic_store(&s_tap_until_us, 0);

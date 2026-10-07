@@ -10,6 +10,8 @@
  *          for test_hooks_tap_ms; the client replies "tap <us>" with the time
  *          from command received to the tap leaving for the host.
  *   ping   replies "pong", to measure the UDP hop.
+ * If the console refuses that port, the hooks take a free one; either way
+ * the log line "hooks: TEST HOOKS ON, udp :<port>" names the port in use.
  * Replies go to the sender's address. Every reply is a duration on the
  * console's clock, so the harness never needs the two clocks in sync.
  */
