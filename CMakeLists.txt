@@ -69,6 +69,7 @@ if(PS4)
     add_executable(moonlight-ps4.elf
         src/main.c
         src/stream.c
+        src/test_hooks.c
         src/ports/ps4_entropy.c
         src/orbis/net_orbis.c
         src/orbis/videodec2_loader.c

@@ -99,6 +99,8 @@ void config_set_defaults(app_config_t *cfg) {
     cfg->bgra_nt = -1;
     cfg->input_poll_us = 1000;
     cfg->rfi = false;
+    cfg->test_hooks_port = 0;
+    cfg->test_hooks_tap_ms = 120;
     cfg->latency_mode = LATENCY_STANDARD;
     cfg->latency_overrides = 0;
     config_apply_latency_mode(cfg);
@@ -239,6 +241,10 @@ int config_load(app_config_t *cfg, const char *dir) {
         }
         else if (!strcmp(key, "rfi"))
             cfg->rfi = parse_bool(val);
+        else if (!strcmp(key, "test_hooks_port"))
+            cfg->test_hooks_port = atoi(val);
+        else if (!strcmp(key, "test_hooks_tap_ms"))
+            cfg->test_hooks_tap_ms = atoi(val);
         else
             LOGW("config: clave desconocida '%s'", key);
     }
@@ -355,6 +361,10 @@ int config_save(const app_config_t *cfg, const char *dir) {
         fprintf(f, "input_poll_us = %d\n", cfg->input_poll_us);
     if (cfg->rfi)
         fprintf(f, "rfi = true\n");
+    if (cfg->test_hooks_port > 0)
+        fprintf(f, "test_hooks_port = %d\n", cfg->test_hooks_port);
+    if (cfg->test_hooks_tap_ms != 120)
+        fprintf(f, "test_hooks_tap_ms = %d\n", cfg->test_hooks_tap_ms);
     fclose(f);
     return 0;
 }
