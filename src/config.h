@@ -13,7 +13,8 @@
  * those keys written explicitly in moonlight.ini override the mode. */
 typedef enum {
     LATENCY_STANDARD = 0, /* validated defaults */
-    LATENCY_LOW = 1,      /* direct submit, YCbCr triple buffering without flip wait */
+    LATENCY_LOW = 1,      /* direct submit, YCbCr triple buffering without flip wait,
+                           * decoder pipeline depth capped at 1 */
     LATENCY_LOWEST = 2,   /* LOW + hsync flips (tearing) */
     LATENCY_MODE_COUNT
 } latency_mode_t;
@@ -43,7 +44,7 @@ typedef struct {
     /* Videodec2 tuning, A/B-able on console without a rebuild. Rev-2 defaults
      * (depth=2 + AU ONION) are the fast path; files with cfg_rev < 2 get them
      * re-applied on load. See docs/CONSOLE_VALIDATE.md. */
-    int dec_pipeline_depth; // frames in flight inside Videodec2 (1..VIDEODEC2_MAX_FB)
+    int dec_pipeline_depth; // frames in flight inside Videodec2 (1..VIDEODEC2_MAX_FB); Low/Lowest cap it at 1
     int dec_thread_prio;    // Orbis priority of the Vdec CPU worker (lower = higher)
     int slices_per_frame;   // CAPABILITY_SLICES_PER_FRAME asked of the host
     bool dec_au_onion;      // AU bitstream in cacheable ONION (false = WC_GARLIC)

@@ -112,7 +112,7 @@ static const char *k_set_names[SET_COUNT] = {
 /* One-line help shown under the list while "Latency mode" is selected. */
 static const char *k_latency_help[LATENCY_MODE_COUNT] = {
     "Standard: smoothest picture, tested defaults.",
-    "Low: less buffering between the stream and the screen.",
+    "Low: no decoder or display queue between the stream and the screen.",
     "Lowest: least delay, but a tear line may be visible.",
 };
 

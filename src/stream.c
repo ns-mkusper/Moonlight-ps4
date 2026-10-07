@@ -265,7 +265,16 @@ start_ok:
     } else {
         int probe = video_orbis_probe(cfg->stream.width, cfg->stream.height);
         if (probe == 0) {
-            video_orbis_set_tuning(cfg->dec_pipeline_depth, cfg->dec_thread_prio,
+            /* depth 2 overlaps parsing of the next AU with this one's decode
+             * but returns each picture one Decode call late: a whole frame of
+             * latency. The latency modes trade that throughput back. */
+            int dec_depth = cfg->dec_pipeline_depth;
+            if (cfg->latency_mode >= LATENCY_LOW && dec_depth > 1) {
+                LOGI("stream: latency=%s caps decoder pipeline depth %d -> 1",
+                     config_latency_mode_key(cfg->latency_mode), dec_depth);
+                dec_depth = 1;
+            }
+            video_orbis_set_tuning(dec_depth, cfg->dec_thread_prio,
                                    cfg->dec_au_onion, cfg->dec_fb_garlic);
             dr = video_callbacks_orbis;
             if (cfg->slices_per_frame > 0)
