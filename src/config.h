@@ -66,6 +66,8 @@ typedef struct {
     bool flip_hsync;        // flip on hsync (tearing) instead of vsync: ~half a refresh less wait
     bool direct_submit;     // CAPABILITY_DIRECT_SUBMIT: decode on the receive thread, no DU queue
     bool rfi;               // experimental, ini only: CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC instead of IDR on loss
+    int test_hooks_port;    // ini only: UDP port for the latency test hooks (flash/tap/ping, see test_hooks.h), e.g. 48100; 0 = off
+    int test_hooks_tap_ms;  // ini only: length of an injected "tap", default 120
 } app_config_t;
 
 void config_set_defaults(app_config_t *cfg);

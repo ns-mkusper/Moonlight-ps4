@@ -1,5 +1,6 @@
 #include "input_pad.h"
 #include "../log.h"
+#include "../test_hooks.h"
 
 #include <Limelight.h>
 
@@ -226,6 +227,12 @@ bool input_poll(void) {
     short rx = stick_to_short(pad.rightStick.x);
     short ry = stick_to_short_inverted(pad.rightStick.y);
 
+    int tap = test_hooks_tap_active();
+    if (tap) {
+        rx = 32767;
+        ry = 0;
+    }
+
     pad_sent_t cur;
     memset(&cur, 0, sizeof(cur)); /* zero any padding: compared with memcmp */
     cur.buttons = buttons;
@@ -240,6 +247,8 @@ bool input_poll(void) {
                                    cur.lx, cur.ly, cur.rx, cur.ry);
         s_last_sent = cur;
         s_have_last_sent = 1;
+        if (tap)
+            test_hooks_tap_sent();
     }
 
     // Quit combo: OPTIONS + TOUCHPAD for ~1 s.

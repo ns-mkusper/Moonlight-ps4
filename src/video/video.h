@@ -14,6 +14,10 @@ extern DECODER_RENDERER_CALLBACKS video_callbacks_ffmpeg;
 #ifdef __ORBIS__
 extern DECODER_RENDERER_CALLBACKS video_callbacks_orbis;
 int video_orbis_probe(int width, int height);
+/* Pictures Videodec2 returned this many Decode() calls after their AU went in
+ * (0 = same call); -1 before the first picture. *max_out gets the worst lag
+ * since the previous call, which resets it. */
+int video_orbis_take_lag(int *max_out);
 int videodec2_spike_run(void);
 /* Videodec2 tuning; must be called before LiStartConnection (dr_setup latches it). */
 void video_orbis_set_tuning(int pipeline_depth, int thread_prio,

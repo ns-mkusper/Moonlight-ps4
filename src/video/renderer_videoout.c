@@ -2,6 +2,7 @@
 #include "video.h"
 #include "nv12_blit.h"
 #include "../log.h"
+#include "../test_hooks.h"
 #include "../orbis/video_out_c.h"
 #include "../ui/ui_draw.h"
 
@@ -1260,15 +1261,39 @@ static void draw_stats_overlay(uint8_t *dst) {
     }
 }
 
+/* Test hook "flash": a white square in the top-left corner of this frame.
+ * Written after the frame's convert/blit, so it never touches the decoder's
+ * reference pictures. BGRA: 4 bytes per pixel. YCbCr: luma 235 and neutral
+ * chroma; hrep4 buffers carry every sample 4 times. */
+#define FLASH_PATCH_PX 128
+static void paint_flash_patch(uint8_t *dst) {
+    int bpp = (s_use_bgra || s_ycc_hrep4) ? 4 : 1;
+    size_t row_bytes = (size_t)FLASH_PATCH_PX * (size_t)bpp;
+    if (row_bytes > (size_t)s_pitch)
+        row_bytes = (size_t)s_pitch;
+    for (int r = 0; r < FLASH_PATCH_PX && r < s_buf_h; r++)
+        memset(dst + (size_t)r * (size_t)s_pitch, s_use_bgra ? 0xFF : 0xEB, row_bytes);
+    if (!s_use_bgra) {
+        uint8_t *uv = dst + (size_t)s_pitch * (size_t)s_buf_h;
+        for (int r = 0; r < FLASH_PATCH_PX / 2 && r < s_buf_h / 2; r++)
+            memset(uv + (size_t)r * (size_t)s_pitch, 0x80, row_bytes);
+    }
+}
+
 static void present_submit_flip(int next, uint8_t *dst, uint64_t convert_us) {
     if (s_show_stats && s_use_bgra)
         draw_stats_overlay(dst);
+    int flash = test_hooks_take_flash();
+    if (flash)
+        paint_flash_patch(dst);
 
     __asm__ volatile("sfence" ::: "memory");
     sceGnmFlushGarlic();
 
     uint64_t t1 = now_us();
     int32_t flip_rc = sceVideoOutSubmitFlip(s_video, next, (uint32_t)s_flip_mode, 0);
+    if (flash)
+        test_hooks_flash_flipped();
     s_fb_index = next;
     s_prev_flip_idx = s_last_flip_idx;
     s_last_flip_idx = next;

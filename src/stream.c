@@ -9,6 +9,7 @@
 #include "audio/audio_orbis.h"
 #include "video/video.h"
 #include "input/input_pad.h"
+#include "test_hooks.h"
 #include "ui/ui_menu.h"
 
 #include <stdio.h>
@@ -316,6 +317,8 @@ start_ok:
     LOGI("main loop; OPTIONS+TOUCHPAD 1s to quit");
 
     int input_threaded = (input_thread_start(cfg->input_poll_us) == 0);
+    if (cfg->test_hooks_port > 0)
+        (void)test_hooks_start(cfg->test_hooks_port, cfg->test_hooks_tap_ms);
 
     int ticks = 0;
     while (input_threaded ? !input_should_quit() : !input_poll()) {
@@ -336,6 +339,12 @@ start_ok:
                      st.frames ? (st.present_us_total / nf) / 1000.0 : 0.0);
                 LOGI("  au=%.2fms %.0fKB/frame", (st.au_us_total / nd) / 1000.0,
                      (st.au_bytes_total / nd) / 1024.0);
+#if ML_ENABLE_VIDEODEC2
+                int lag_max = -1;
+                int lag = video_orbis_take_lag(&lag_max);
+                if (lag >= 0)
+                    LOGI("  dec_lag=%d max=%d (Decode calls)", lag, lag_max);
+#endif
                 video_reset_stats();
             }
         }
@@ -347,6 +356,7 @@ start_ok:
 
     if (input_threaded)
         input_thread_stop();
+    test_hooks_stop();
     LOGI("leaving loop (quit or disconnect)");
     LiStopConnection();
     /* No gs_quit_app: leave the game on Sunshine for resume → "paused". */

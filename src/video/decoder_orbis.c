@@ -7,6 +7,7 @@
 #include "../gamestream/sps.h"
 
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -499,6 +500,19 @@ static void log_nal_types(const uint8_t *buf, int len) {
          len > 3 ? buf[3] : 0, len > 4 ? buf[4] : 0, len > 5 ? buf[5] : 0);
 }
 
+/* Decoder output lag in Decode() calls, see dr_submit(). */
+#define LAG_RING 8u
+static void *s_lag_fb[LAG_RING];
+static uint32_t s_lag_seq;
+static atomic_int s_lag_last = -1;
+static atomic_int s_lag_max = -1;
+
+int video_orbis_take_lag(int *max_out) {
+    if (max_out)
+        *max_out = atomic_exchange(&s_lag_max, -1);
+    return atomic_load(&s_lag_last);
+}
+
 static int dr_setup(int videoFormat, int width, int height, int redrawRate,
                     void *context, int drFlags) {
     (void)drFlags; (void)redrawRate;
@@ -519,6 +533,10 @@ static int dr_setup(int videoFormat, int width, int height, int redrawRate,
     s_pts_base = 0;
     s_time_base_us = 0;
     s_have_pts_base = 0;
+    memset(s_lag_fb, 0, sizeof(s_lag_fb));
+    s_lag_seq = 0;
+    atomic_store(&s_lag_last, -1);
+    atomic_store(&s_lag_max, -1);
     video_reset_stats();
     gs_sps_init(width, height);
 
@@ -674,6 +692,11 @@ static int dr_submit(PDECODE_UNIT du) {
     memset(&out, 0, sizeof(out));
     out.thisSize = sizeof(out);
 
+    /* Remember which call handed in this framebuffer, so the picture that
+     * comes back can be matched to it: lag 0 = this call's own AU. */
+    s_lag_seq++;
+    s_lag_fb[s_lag_seq % LAG_RING] = fb.frameBuffer;
+
     int rc = s_api.Decode(s_dec, &in, &fb, &out);
     uint64_t t1 = now_us();
 
@@ -703,6 +726,15 @@ static int dr_submit(PDECODE_UNIT du) {
     }
 
     s_err_streak = 0;
+
+    for (uint32_t k = 0; k < LAG_RING; k++) {
+        if (s_lag_fb[(s_lag_seq - k) % LAG_RING] == out.frameBuffer) {
+            atomic_store(&s_lag_last, (int)k);
+            if ((int)k > atomic_load(&s_lag_max))
+                atomic_store(&s_lag_max, (int)k);
+            break;
+        }
+    }
 
     /*
      * Decode already ran (possible overlap with prior frame convert).
