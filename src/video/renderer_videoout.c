@@ -35,10 +35,18 @@ static int s_use_bgra;
 static int s_plugin_ok;
 static int s_flip_logged;
 static int s_flip_mode = ML_VIDEO_OUT_FLIP_VSYNC;
+
+/* Latency tuning, set per stream by video_present_set_latency_tuning(). */
+static int s_ycc_buffers = FB_COUNT_YCC_ALLOC;
+static int s_ycc_wait_flip = 1;
+static int s_flip_hsync = 0;
 static int s_present_wb; /* 1 if blit writes to cacheable alias */
 static int s_ycc_hrep4;  /* 1: expand ×4; 0: NV12 packed */
 static int s_gray_left;  /* gray test frames at start */
 static int s_last_flip_idx = -1;
+/* The flip before s_last_flip_idx: with 3 buffers and no post-flip wait, two
+ * flips can be queued at once, and both buffers are still owned by video out. */
+static int s_prev_flip_idx = -1;
 static int s_flip_wait_logs;
 static int s_show_stats;
 
@@ -326,13 +334,22 @@ static void try_ycbcr_privilege(int video_handle) {
 
 /* 0.7.32: RegisterBuffers OK but SubmitFlip → 0x80290001 / cur=-1 (black screen). */
 static int32_t probe_submit_flip(int buf_idx) {
-    static const uint32_t modes[] = {
+    /* First mode that the port accepts wins. VSYNC first unless flip_hsync
+     * asked for tearing-allowed flips, which skip the average half-refresh
+     * (~8 ms at 60 Hz) wait for the next vblank. */
+    static const uint32_t modes_vsync[] = {
         ML_VIDEO_OUT_FLIP_VSYNC,
-        2u, /* HSYNC / ASAP en algunos docs */
+        ML_VIDEO_OUT_FLIP_HSYNC,
         0u,
     };
+    static const uint32_t modes_hsync[] = {
+        ML_VIDEO_OUT_FLIP_HSYNC,
+        ML_VIDEO_OUT_FLIP_VSYNC,
+        0u,
+    };
+    const uint32_t *modes = s_flip_hsync ? modes_hsync : modes_vsync;
     int32_t last = -1;
-    for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
+    for (size_t i = 0; i < sizeof(modes_vsync) / sizeof(modes_vsync[0]); i++) {
         int32_t rc = sceVideoOutSubmitFlip(s_video, buf_idx, modes[i], 0);
         MlVideoOutFlipStatus st;
         memset(&st, 0, sizeof(st));
@@ -380,6 +397,7 @@ static int switch_to_bgra(int w, int h) {
     s_use_bgra = 1;
     s_fb_index = 0;
     s_last_flip_idx = -1;
+    s_prev_flip_idx = -1;
     s_flip_logged = 0;
     s_flip_wait_logs = 0;
     s_flip_mode = ML_VIDEO_OUT_FLIP_VSYNC;
@@ -394,6 +412,7 @@ static int switch_to_bgra(int w, int h) {
         return -1;
     }
     s_last_flip_idx = 0;
+    s_prev_flip_idx = -1;
     nv12_blit_init();
     bgra_worker_start();
     LOGI("present_mode=BGRA (fallback) plugin=%s buf_h=%d n=%d wb=%d convert=sse2_mt",
@@ -943,8 +962,16 @@ int video_present_init(int w, int h, int prefer_ycbcr) {
      */
     int stride4 = w * YCC_STRIDE_MUL;
     size_t need = nv12_size(stride4, reg_h > 1088 ? reg_h : 1088);
-    if (alloc_dmem(need, FB_COUNT_YCC_ALLOC, FB_COUNT_YCC_ALLOC, 1 /* force WC */) != 0)
-        return -1;
+    int ycc_n = s_ycc_buffers;
+    if (alloc_dmem(need, ycc_n, ycc_n, 1 /* force WC */) != 0) {
+        if (ycc_n <= FB_COUNT_YCC_ALLOC)
+            return -1;
+        LOGW("present: YCbCr alloc of %d buffers failed; retrying with %d",
+             ycc_n, FB_COUNT_YCC_ALLOC);
+        ycc_n = FB_COUNT_YCC_ALLOC;
+        if (alloc_dmem(need, ycc_n, ycc_n, 1 /* force WC */) != 0)
+            return -1;
+    }
 
     LOGI("present: dmem alloc=%d fb_size=0x%zx total=0x%zx wb=%d stride4=%d",
          s_fb_alloc, s_fb_size, s_dmem_size, s_present_wb, stride4);
@@ -968,9 +995,15 @@ int video_present_init(int w, int h, int prefer_ycbcr) {
 
     s_ycc_hrep4 = 1;
     rc = -1;
-    /* Prefer n=2 (no tearing); fall back to n=1 if kernel rejects. */
-    int n_try[] = { s_fb_alloc, 1 };
+    /* Prefer every allocated buffer (3 lets decode overlap the vblank wait,
+     * 2 is the validated default); step down to 2 and then 1 if the kernel
+     * rejects the registration. */
+    int n_try[] = { s_fb_alloc, 2, 1 };
+    int n_last = 0;
     for (size_t ni = 0; ni < sizeof(n_try) / sizeof(n_try[0]) && rc != 0; ni++) {
+        if (n_try[ni] > s_fb_alloc || n_try[ni] == n_last)
+            continue;
+        n_last = n_try[ni];
         s_fb_count = n_try[ni];
         for (size_t i = 0; i < sizeof(tries) / sizeof(tries[0]); i++) {
             (void)sceVideoOutUnregisterBuffers(s_video, 0);
@@ -1003,6 +1036,7 @@ int video_present_init(int w, int h, int prefer_ycbcr) {
     s_use_bgra = 0;
     s_fb_index = 0;
     s_last_flip_idx = -1;
+    s_prev_flip_idx = -1;
     s_flip_logged = 0;
     s_flip_wait_logs = 0;
     s_flip_mode = ML_VIDEO_OUT_FLIP_VSYNC;
@@ -1025,6 +1059,7 @@ int video_present_init(int w, int h, int prefer_ycbcr) {
         return 0;
     }
     s_last_flip_idx = 0;
+    s_prev_flip_idx = -1;
     s_fb_index = 0;
 
     nv12_blit_init();
@@ -1054,6 +1089,7 @@ bgra_debug:
     s_use_bgra = 1;
     s_fb_index = 0;
     s_last_flip_idx = -1;
+    s_prev_flip_idx = -1;
     s_flip_logged = 0;
     s_flip_wait_logs = 0;
     s_flip_mode = ML_VIDEO_OUT_FLIP_VSYNC;
@@ -1065,6 +1101,7 @@ bgra_debug:
     sceGnmFlushGarlic();
     (void)probe_submit_flip(0);
     s_last_flip_idx = 0;
+    s_prev_flip_idx = -1;
     s_fb_index = 0;
     nv12_blit_init();
     bgra_resolve_store_mode();
@@ -1093,6 +1130,18 @@ void video_present_shutdown(void) {
     /* s_video / dmem / s_use_bgra / size are preserved */
 }
 
+void video_present_set_latency_tuning(int ycc_buffers, int ycc_wait_flip, int flip_hsync) {
+    if (ycc_buffers < 1)
+        ycc_buffers = 1;
+    if (ycc_buffers > FB_COUNT_MAX)
+        ycc_buffers = FB_COUNT_MAX;
+    s_ycc_buffers = ycc_buffers;
+    s_ycc_wait_flip = ycc_wait_flip ? 1 : 0;
+    s_flip_hsync = flip_hsync ? 1 : 0;
+    LOGI("present: latency tuning ycc_buffers=%d wait_flip=%d flip_hsync=%d",
+         s_ycc_buffers, s_ycc_wait_flip, s_flip_hsync);
+}
+
 int video_present_is_bgra(void) {
     return s_use_bgra;
 }
@@ -1111,6 +1160,8 @@ static int pick_free_fb(int *out_shown) {
             if (shown >= 0 && cand == shown)
                 continue;
             if (st0.numFlipPending > 0 && cand == s_last_flip_idx)
+                continue;
+            if (st0.numFlipPending > 1 && cand == s_prev_flip_idx)
                 continue;
             if (s_pipe_active && cand == s_pipe_fb_idx)
                 continue;
@@ -1219,10 +1270,16 @@ static void present_submit_flip(int next, uint8_t *dst, uint64_t convert_us) {
     uint64_t t1 = now_us();
     int32_t flip_rc = sceVideoOutSubmitFlip(s_video, next, (uint32_t)s_flip_mode, 0);
     s_fb_index = next;
+    s_prev_flip_idx = s_last_flip_idx;
     s_last_flip_idx = next;
 
     int shown_ok = 1;
-    if (!s_use_bgra && s_fb_count > 1 && flip_rc == 0)
+    /* Blocking here stalls the decode thread for up to a refresh, so the
+     * next frame cannot start decoding until this one is on screen. Kept as
+     * the default for 2 buffers (pick_free_fb could otherwise land on a
+     * buffer the display has not released yet); with 3 registered buffers
+     * and ycbcr_wait_flip=false it is skipped. */
+    if (!s_use_bgra && s_fb_count > 1 && flip_rc == 0 && (s_ycc_wait_flip || s_fb_count < 3))
         shown_ok = wait_flip_shown(next, 32);
 
     uint64_t t2 = now_us();
@@ -1453,6 +1510,8 @@ static int ui_wait_backbuffer(int timeout_ms) {
                 continue;
             if (st.numFlipPending > 0 && cand == s_last_flip_idx)
                 continue;
+            if (st.numFlipPending > 1 && cand == s_prev_flip_idx)
+                continue;
             return cand;
         }
         sceKernelUsleep(1000);
@@ -1483,6 +1542,7 @@ int video_ui_flip(int idx) {
         rc = sceVideoOutSubmitFlip(s_video, idx, (uint32_t)s_flip_mode, 0);
     if (rc == 0) {
         s_fb_index = idx;
+        s_prev_flip_idx = s_last_flip_idx;
         s_last_flip_idx = idx;
     }
     return rc;

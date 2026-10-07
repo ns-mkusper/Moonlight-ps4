@@ -12,6 +12,60 @@
 #include <orbis/libkernel.h>
 #endif
 
+static const char *k_latency_keys[LATENCY_MODE_COUNT] = { "standard", "low", "lowest" };
+static const char *k_latency_labels[LATENCY_MODE_COUNT] = { "Standard", "Low", "Lowest (tearing)" };
+
+typedef struct {
+    bool direct_submit;
+    int ycbcr_buffers;
+    bool ycbcr_wait_flip;
+    bool flip_hsync;
+} latency_knobs_t;
+
+static latency_knobs_t latency_mode_knobs(int mode) {
+    latency_knobs_t k = { false, 2, true, false };   /* standard */
+    if (mode >= LATENCY_LOW) {
+        k.direct_submit = true;
+        k.ycbcr_buffers = 3;
+        k.ycbcr_wait_flip = false;
+    }
+    if (mode >= LATENCY_LOWEST)
+        k.flip_hsync = true;
+    return k;
+}
+
+static int latency_mode_clamp(int mode) {
+    return (mode < 0 || mode >= LATENCY_MODE_COUNT) ? LATENCY_STANDARD : mode;
+}
+
+const char *config_latency_mode_key(int mode) {
+    return k_latency_keys[latency_mode_clamp(mode)];
+}
+
+const char *config_latency_mode_label(int mode) {
+    return k_latency_labels[latency_mode_clamp(mode)];
+}
+
+void config_apply_latency_mode(app_config_t *cfg) {
+    cfg->latency_mode = latency_mode_clamp(cfg->latency_mode);
+    latency_knobs_t k = latency_mode_knobs(cfg->latency_mode);
+    unsigned o = cfg->latency_overrides;
+    if (!(o & LAT_OVR_DIRECT_SUBMIT))   cfg->direct_submit = k.direct_submit;
+    if (!(o & LAT_OVR_YCBCR_BUFFERS))   cfg->ycbcr_buffers = k.ycbcr_buffers;
+    if (!(o & LAT_OVR_YCBCR_WAIT_FLIP)) cfg->ycbcr_wait_flip = k.ycbcr_wait_flip;
+    if (!(o & LAT_OVR_FLIP_HSYNC))      cfg->flip_hsync = k.flip_hsync;
+}
+
+static int parse_latency_mode(const char *v) {
+    for (int i = 0; i < LATENCY_MODE_COUNT; i++)
+        if (!strcasecmp(v, k_latency_keys[i]))
+            return i;
+    if (v[0] >= '0' && v[0] <= '9')
+        return latency_mode_clamp(atoi(v));
+    LOGW("config: latency_mode '%s' unknown; using standard", v);
+    return LATENCY_STANDARD;
+}
+
 void config_set_defaults(app_config_t *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     LiInitializeStreamConfiguration(&cfg->stream);
@@ -43,6 +97,11 @@ void config_set_defaults(app_config_t *cfg) {
     cfg->dec_fb_garlic = false;
     cfg->bgra_workers = 4;
     cfg->bgra_nt = -1;
+    cfg->input_poll_us = 1000;
+    cfg->rfi = false;
+    cfg->latency_mode = LATENCY_STANDARD;
+    cfg->latency_overrides = 0;
+    config_apply_latency_mode(cfg);
     snprintf(cfg->app_name, sizeof(cfg->app_name), "Steam Big Picture");
 }
 
@@ -161,6 +220,25 @@ int config_load(app_config_t *cfg, const char *dir) {
             cfg->bgra_workers = atoi(val);
         else if (!strcmp(key, "bgra_nt"))
             cfg->bgra_nt = atoi(val);
+        else if (!strcmp(key, "input_poll_us"))
+            cfg->input_poll_us = atoi(val);
+        else if (!strcmp(key, "latency_mode"))
+            cfg->latency_mode = parse_latency_mode(val);
+        else if (!strcmp(key, "ycbcr_buffers")) {
+            cfg->ycbcr_buffers = atoi(val);
+            cfg->latency_overrides |= LAT_OVR_YCBCR_BUFFERS;
+        } else if (!strcmp(key, "ycbcr_wait_flip")) {
+            cfg->ycbcr_wait_flip = parse_bool(val);
+            cfg->latency_overrides |= LAT_OVR_YCBCR_WAIT_FLIP;
+        } else if (!strcmp(key, "flip_hsync")) {
+            cfg->flip_hsync = parse_bool(val);
+            cfg->latency_overrides |= LAT_OVR_FLIP_HSYNC;
+        } else if (!strcmp(key, "direct_submit")) {
+            cfg->direct_submit = parse_bool(val);
+            cfg->latency_overrides |= LAT_OVR_DIRECT_SUBMIT;
+        }
+        else if (!strcmp(key, "rfi"))
+            cfg->rfi = parse_bool(val);
         else
             LOGW("config: clave desconocida '%s'", key);
     }
@@ -183,6 +261,24 @@ int config_load(app_config_t *cfg, const char *dir) {
         cfg->dec_au_onion = true;
     }
 
+    /* Mode first, then explicit ini keys win (they were read above and are
+     * protected by their LAT_OVR_* bit). */
+    config_apply_latency_mode(cfg);
+
+    if (cfg->input_poll_us < 0)
+        cfg->input_poll_us = 0;
+    if (cfg->input_poll_us > 0 && cfg->input_poll_us < 250)
+        cfg->input_poll_us = 250;
+    if (cfg->ycbcr_buffers < 1)
+        cfg->ycbcr_buffers = 1;
+    if (cfg->ycbcr_buffers > 3)
+        cfg->ycbcr_buffers = 3;
+
+    LOGI("config: latency mode=%s overrides=0x%x input_poll_us=%d ycbcr_buffers=%d "
+         "ycbcr_wait_flip=%d flip_hsync=%d direct_submit=%d rfi=%d",
+         config_latency_mode_key(cfg->latency_mode), cfg->latency_overrides,
+         cfg->input_poll_us, cfg->ycbcr_buffers, cfg->ycbcr_wait_flip,
+         cfg->flip_hsync, cfg->direct_submit, cfg->rfi);
     LOGI("config: host=%s app=%s debug=%s %dx%d@%d br=%d pkt=%d hw=%d ycbcr=%d file_log=%d",
          cfg->host, cfg->app_name, cfg->debug_host,
          cfg->stream.width, cfg->stream.height, cfg->stream.fps, cfg->stream.bitrate,
@@ -224,7 +320,8 @@ int config_save(const app_config_t *cfg, const char *dir) {
             "dec_au_onion = %s\n"
             "dec_fb_garlic = %s\n"
             "bgra_workers = %d\n"
-            "bgra_nt = %d\n",
+            "bgra_nt = %d\n"
+            "latency_mode = %s\n",
             cfg->host, cfg->app_name, cfg->debug_host,
             cfg->stream.width, cfg->stream.height, cfg->stream.fps, cfg->stream.bitrate,
             cfg->stream.packetSize,
@@ -238,7 +335,26 @@ int config_save(const app_config_t *cfg, const char *dir) {
             cfg->dec_pipeline_depth, cfg->dec_thread_prio, cfg->slices_per_frame,
             cfg->dec_au_onion ? "true" : "false",
             cfg->dec_fb_garlic ? "true" : "false",
-            cfg->bgra_workers, cfg->bgra_nt);
+            cfg->bgra_workers, cfg->bgra_nt,
+            config_latency_mode_key(cfg->latency_mode));
+
+    /* Advanced latency keys: written only when they differ from what the
+     * mode (or the default) implies, so changing the mode in SETTINGS keeps
+     * working and future default changes reach existing installs. A key
+     * present in the file overrides the mode on the next load. */
+    latency_knobs_t k = latency_mode_knobs(cfg->latency_mode);
+    if (cfg->direct_submit != k.direct_submit)
+        fprintf(f, "direct_submit = %s\n", cfg->direct_submit ? "true" : "false");
+    if (cfg->ycbcr_buffers != k.ycbcr_buffers)
+        fprintf(f, "ycbcr_buffers = %d\n", cfg->ycbcr_buffers);
+    if (cfg->ycbcr_wait_flip != k.ycbcr_wait_flip)
+        fprintf(f, "ycbcr_wait_flip = %s\n", cfg->ycbcr_wait_flip ? "true" : "false");
+    if (cfg->flip_hsync != k.flip_hsync)
+        fprintf(f, "flip_hsync = %s\n", cfg->flip_hsync ? "true" : "false");
+    if (cfg->input_poll_us != 1000)
+        fprintf(f, "input_poll_us = %d\n", cfg->input_poll_us);
+    if (cfg->rfi)
+        fprintf(f, "rfi = true\n");
     fclose(f);
     return 0;
 }

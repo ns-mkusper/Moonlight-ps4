@@ -90,6 +90,7 @@ enum {
     SET_PREFER_YCBCR,
     SET_FILE_LOG,
     SET_SHOW_STATS,
+    SET_LATENCY,
     SET_COUNT,
 };
 
@@ -105,6 +106,14 @@ static const char *k_set_names[SET_COUNT] = {
     "YCbCr (experimental)",
     "File logging",
     "Perf overlay",
+    "Latency mode",
+};
+
+/* One-line help shown under the list while "Latency mode" is selected. */
+static const char *k_latency_help[LATENCY_MODE_COUNT] = {
+    "Standard: smoothest picture, tested defaults.",
+    "Low: no decoder or display queue between the stream and the screen.",
+    "Lowest: least delay, but a tear line may be visible.",
 };
 
 /* On-screen keyboard 4x10. */
@@ -221,6 +230,10 @@ static void set_value_str(const ui_state_t *st, int row, char *out, size_t cap) 
     case SET_PREFER_YCBCR:snprintf(out, cap, "%s", c->prefer_ycbcr ? "yes" : "no"); break;
     case SET_FILE_LOG:    snprintf(out, cap, "%s", c->enable_file_log ? "yes" : "no"); break;
     case SET_SHOW_STATS:  snprintf(out, cap, "%s", c->show_stats ? "yes" : "no"); break;
+    case SET_LATENCY:
+        snprintf(out, cap, "%s%s", config_latency_mode_label(c->latency_mode),
+                 c->latency_overrides ? " (custom)" : "");
+        break;
     default: out[0] = '\0'; break;
     }
 }
@@ -391,6 +404,14 @@ static void settings_input(ui_state_t *st, unsigned pr) {
         }
         break;
     case SET_SHOW_STATS:  c->show_stats = !c->show_stats; break;
+    case SET_LATENCY:
+        c->latency_mode = (c->latency_mode + (dir ? dir : 1) + LATENCY_MODE_COUNT) %
+                          LATENCY_MODE_COUNT;
+        /* Picking a mode in the menu replaces any hand-edited advanced keys. */
+        c->latency_overrides = 0;
+        config_apply_latency_mode(c);
+        LOGI("ui: latency mode -> %s", config_latency_mode_key(c->latency_mode));
+        break;
     default: changed = 0; break;
     }
     if (changed)
@@ -491,8 +512,15 @@ static void draw_settings(ui_state_t *st, ui_surface_t *s) {
         set_value_str(st, i, val, sizeof(val));
         ui_text(s, 820, y, 3, sel ? COL_ACCENT : COL_DIM, val);
     }
+    int note_y = y0 + SET_COUNT * row_h + 20;
+    if (st->sel_set == SET_LATENCY) {
+        int m = st->cfg->latency_mode;
+        if (m >= 0 && m < LATENCY_MODE_COUNT)
+            ui_text(s, 120, note_y, 2, COL_DIM, k_latency_help[m]);
+        note_y += 34;
+    }
     if (st->host_dirty)
-        ui_text(s, 120, y0 + SET_COUNT * row_h + 20, 2, COL_WARN,
+        ui_text(s, 120, note_y, 2, COL_WARN,
                 "Host changed: TRIANGLE on APPS reconnects");
 }
 

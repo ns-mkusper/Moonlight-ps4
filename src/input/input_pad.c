@@ -16,6 +16,16 @@ static atomic_bool s_quit;
 static uint64_t s_combo_start_us;
 static int s_announced;
 
+/* Last state sent to the host. With a 1 ms poll, sending every read would
+ * be ~1000 packets/s of duplicates; send only when something changed. */
+typedef struct {
+    int buttons;
+    unsigned char lt, rt;
+    short lx, ly, rx, ry;
+} pad_sent_t;
+static pad_sent_t s_last_sent;
+static int s_have_last_sent;
+
 /* Menu-mode state (edges + D-pad auto-repeat). */
 static unsigned s_menu_prev;
 static uint64_t s_menu_rpt_start_us;
@@ -79,6 +89,7 @@ void input_reset(void) {
     atomic_store(&s_quit, false);
     s_combo_start_us = 0;
     s_announced = 0;
+    s_have_last_sent = 0;
     s_menu_prev = 0;
     s_menu_rpt_start_us = 0;
     s_menu_rpt_last_us = 0;
@@ -215,9 +226,21 @@ bool input_poll(void) {
     short rx = stick_to_short(pad.rightStick.x);
     short ry = stick_to_short_inverted(pad.rightStick.y);
 
-    LiSendMultiControllerEvent(0, 0x1, buttons,
-                               pad.analogButtons.l2, pad.analogButtons.r2,
-                               lx, ly, rx, ry);
+    pad_sent_t cur;
+    memset(&cur, 0, sizeof(cur)); /* zero any padding: compared with memcmp */
+    cur.buttons = buttons;
+    cur.lt = pad.analogButtons.l2;
+    cur.rt = pad.analogButtons.r2;
+    cur.lx = lx;
+    cur.ly = ly;
+    cur.rx = rx;
+    cur.ry = ry;
+    if (!s_have_last_sent || memcmp(&cur, &s_last_sent, sizeof(cur)) != 0) {
+        LiSendMultiControllerEvent(0, 0x1, cur.buttons, cur.lt, cur.rt,
+                                   cur.lx, cur.ly, cur.rx, cur.ry);
+        s_last_sent = cur;
+        s_have_last_sent = 1;
+    }
 
     // Quit combo: OPTIONS + TOUCHPAD for ~1 s.
     const int combo = ORBIS_PAD_BUTTON_OPTIONS | ORBIS_PAD_BUTTON_TOUCH_PAD;

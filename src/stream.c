@@ -17,6 +17,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <pthread.h>
+#include <stdatomic.h>
 
 static gs_server_t s_server;
 static client_identity_t s_id;
@@ -164,6 +166,45 @@ static int stream_connect(app_config_t *cfg, const char *config_dir) {
     return 0;
 }
 
+/*
+ * Dedicated pad thread. The main loop below sleeps 8 ms per tick, so polling
+ * the pad there adds ~4 ms average / 8 ms worst-case input latency and can
+ * miss very short presses. Android-based clients get input events as they
+ * arrive; this thread gets close to that by polling every input_poll_us.
+ */
+static pthread_t s_input_thr;
+static atomic_bool s_input_run;
+static int s_input_poll_us;
+
+static void *input_thread_main(void *arg) {
+    (void)arg;
+    while (atomic_load(&s_input_run)) {
+        if (input_poll())
+            break;
+        usleep((useconds_t)s_input_poll_us);
+    }
+    return NULL;
+}
+
+static int input_thread_start(int poll_us) {
+    if (poll_us <= 0)
+        return -1;
+    s_input_poll_us = poll_us;
+    atomic_store(&s_input_run, true);
+    if (pthread_create(&s_input_thr, NULL, input_thread_main, NULL) != 0) {
+        atomic_store(&s_input_run, false);
+        LOGW("input: pthread_create failed; falling back to main-loop poll");
+        return -1;
+    }
+    LOGI("input: dedicated poll thread every %d us", poll_us);
+    return 0;
+}
+
+static void input_thread_stop(void) {
+    atomic_store(&s_input_run, false);
+    pthread_join(s_input_thr, NULL);
+}
+
 /* One stream session: launch + LiStartConnection + loop until exit. */
 static int stream_play(app_config_t *cfg) {
     s_connected = 0;
@@ -174,10 +215,11 @@ static int stream_play(app_config_t *cfg) {
         LOGE("app not found: '%s'", cfg->app_name);
         return -1;
     }
-    LOGI("launch app_id=%d name='%s' %dx%d@%d bitrate=%d sops=%d localAudio=%d currentGame=%d",
+    LOGI("launch app_id=%d name='%s' %dx%d@%d bitrate=%d sops=%d localAudio=%d currentGame=%d latency=%s%s",
          app_id, cfg->app_name, cfg->stream.width, cfg->stream.height,
          cfg->stream.fps, cfg->stream.bitrate, cfg->sops, cfg->local_audio,
-         s_server.currentGame);
+         s_server.currentGame, config_latency_mode_key(cfg->latency_mode),
+         cfg->latency_overrides ? " (custom)" : "");
 
     /* If Sunshine already has another app active, cancel before launching. */
     if (s_server.currentGame != 0 && s_server.currentGame != app_id) {
@@ -223,11 +265,26 @@ start_ok:
     } else {
         int probe = video_orbis_probe(cfg->stream.width, cfg->stream.height);
         if (probe == 0) {
-            video_orbis_set_tuning(cfg->dec_pipeline_depth, cfg->dec_thread_prio,
+            /* depth 2 overlaps parsing of the next AU with this one's decode
+             * but returns each picture one Decode call late: a whole frame of
+             * latency. The latency modes trade that throughput back. */
+            int dec_depth = cfg->dec_pipeline_depth;
+            if (cfg->latency_mode >= LATENCY_LOW && dec_depth > 1) {
+                LOGI("stream: latency=%s caps decoder pipeline depth %d -> 1",
+                     config_latency_mode_key(cfg->latency_mode), dec_depth);
+                dec_depth = 1;
+            }
+            video_orbis_set_tuning(dec_depth, cfg->dec_thread_prio,
                                    cfg->dec_au_onion, cfg->dec_fb_garlic);
             dr = video_callbacks_orbis;
             if (cfg->slices_per_frame > 0)
                 dr.capabilities = CAPABILITY_SLICES_PER_FRAME(cfg->slices_per_frame);
+            if (cfg->direct_submit)
+                dr.capabilities |= CAPABILITY_DIRECT_SUBMIT;
+            if (cfg->rfi)
+                dr.capabilities |= CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC;
+            LOGI("stream: HW caps=0x%08x direct_submit=%d rfi=%d",
+                 (unsigned)dr.capabilities, cfg->direct_submit, cfg->rfi);
             decoder_reason = "probe OK";
         } else {
             LOGW("stream: HW probe failed rc=%d; fallback SW", probe);
@@ -242,6 +299,7 @@ start_ok:
          cfg->prefer_hw ? "true" : "false", decoder_reason);
     AUDIO_RENDERER_CALLBACKS ar = audio_callbacks_orbis;
 
+    video_present_set_latency_tuning(cfg->ycbcr_buffers, cfg->ycbcr_wait_flip, cfg->flip_hsync);
     video_set_show_stats(cfg->show_stats);
     if (cfg->show_stats && prefer_ycbcr)
         LOGW("stream: Perf overlay requires BGRA; disable YCbCr to see it");
@@ -257,8 +315,10 @@ start_ok:
 
     LOGI("main loop; OPTIONS+TOUCHPAD 1s to quit");
 
+    int input_threaded = (input_thread_start(cfg->input_poll_us) == 0);
+
     int ticks = 0;
-    while (!input_poll()) {
+    while (input_threaded ? !input_should_quit() : !input_poll()) {
         usleep(8000);
         if (++ticks % 125 == 0) {
             video_stats_t st;
@@ -285,6 +345,8 @@ start_ok:
         }
     }
 
+    if (input_threaded)
+        input_thread_stop();
     LOGI("leaving loop (quit or disconnect)");
     LiStopConnection();
     /* No gs_quit_app: leave the game on Sunshine for resume → "paused". */

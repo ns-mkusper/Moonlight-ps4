@@ -6,8 +6,9 @@
 int input_init(void);
 void input_shutdown(void);
 
-// Read the pad and send state. Returns true if the user requests quit
-// (OPTIONS + TOUCHPAD held ~1 s, or the external flag).
+// Read the pad and send state to the host when it changed. Returns true if
+// the user requests quit (OPTIONS + TOUCHPAD held ~1 s, or the external flag).
+// During a stream only one thread may call this (stream.c's input thread).
 bool input_poll(void);
 
 // Request quit from another thread (connectionTerminated, etc.).

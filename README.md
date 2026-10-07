@@ -19,6 +19,7 @@ Playable client for jailbroken PS4 (GoldHEN / FW 9.00 validated):
 - [x] On-console UI (APPS / SETTINGS + on-screen keyboard) and INI config
 - [x] Installable `.pkg` (`CATEGORY=gd`)
 - [x] Optional performance overlay and Videodec2 / BGRA tuning knobs
+- [x] Latency mode in SETTINGS (Standard / Low / Lowest) and a 1 ms controller poll thread
 
 ### TODO
 

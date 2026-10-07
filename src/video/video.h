@@ -71,6 +71,9 @@ void video_stats_get_live(video_live_stats_t *out);
 /* workers <= 0 keeps the default. nt_pref: -1 auto (from the framebuffer
  * mapping), 0 forces cached stores, 1 forces streaming stores. */
 void video_present_set_bgra_tuning(int workers, int nt_pref);
+/* YCbCr scanout buffers (1..3), whether to block until each flip is shown,
+ * and whether to flip on hsync (tearing) instead of vsync. */
+void video_present_set_latency_tuning(int ycc_buffers, int ycc_wait_flip, int flip_hsync);
 int video_present_init(int w, int h, int prefer_ycbcr);
 void video_present_shutdown(void);
 int video_present_should_drop(void);

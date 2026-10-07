@@ -9,6 +9,7 @@
 #define ML_VIDEO_USER_MAIN              0xFF
 #define ML_VIDEO_OUT_BUS_MAIN           0
 #define ML_VIDEO_OUT_FLIP_VSYNC         1
+#define ML_VIDEO_OUT_FLIP_HSYNC         2 /* flip on next hsync: tears, no vblank wait */
 #define ML_VIDEO_OUT_FLIP_60HZ          0
 #define ML_VIDEO_OUT_TILING_TILE        0
 #define ML_VIDEO_OUT_TILING_LINEAR      1
