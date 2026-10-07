@@ -1139,8 +1139,13 @@ void video_present_set_latency_tuning(int ycc_buffers, int ycc_wait_flip, int fl
     s_ycc_buffers = ycc_buffers;
     s_ycc_wait_flip = ycc_wait_flip ? 1 : 0;
     s_flip_hsync = flip_hsync ? 1 : 0;
-    LOGI("present: latency tuning ycc_buffers=%d wait_flip=%d flip_hsync=%d",
-         s_ycc_buffers, s_ycc_wait_flip, s_flip_hsync);
+    /* A BGRA output set up for the menu is reused by the stream without a
+     * new flip probe, so apply the mode here; present_submit_flip() falls
+     * back to vsync if the port rejects hsync. */
+    if (s_video >= 0)
+        s_flip_mode = s_flip_hsync ? ML_VIDEO_OUT_FLIP_HSYNC : ML_VIDEO_OUT_FLIP_VSYNC;
+    LOGI("present: latency tuning ycc_buffers=%d wait_flip=%d flip_hsync=%d flip_mode=%d",
+         s_ycc_buffers, s_ycc_wait_flip, s_flip_hsync, s_flip_mode);
 }
 
 int video_present_is_bgra(void) {
@@ -1292,6 +1297,11 @@ static void present_submit_flip(int next, uint8_t *dst, uint64_t convert_us) {
 
     uint64_t t1 = now_us();
     int32_t flip_rc = sceVideoOutSubmitFlip(s_video, next, (uint32_t)s_flip_mode, 0);
+    if (flip_rc != 0 && s_flip_mode == ML_VIDEO_OUT_FLIP_HSYNC) {
+        LOGW("present: hsync flip rejected (0x%08x); using vsync", (unsigned)flip_rc);
+        s_flip_mode = ML_VIDEO_OUT_FLIP_VSYNC;
+        flip_rc = sceVideoOutSubmitFlip(s_video, next, (uint32_t)s_flip_mode, 0);
+    }
     if (flash)
         test_hooks_flash_flipped();
     s_fb_index = next;
