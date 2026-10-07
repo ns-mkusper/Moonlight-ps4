@@ -44,6 +44,9 @@ static int s_present_wb; /* 1 if blit writes to cacheable alias */
 static int s_ycc_hrep4;  /* 1: expand ×4; 0: NV12 packed */
 static int s_gray_left;  /* gray test frames at start */
 static int s_last_flip_idx = -1;
+/* The flip before s_last_flip_idx: with 3 buffers and no post-flip wait, two
+ * flips can be queued at once, and both buffers are still owned by video out. */
+static int s_prev_flip_idx = -1;
 static int s_flip_wait_logs;
 static int s_show_stats;
 
@@ -394,6 +397,7 @@ static int switch_to_bgra(int w, int h) {
     s_use_bgra = 1;
     s_fb_index = 0;
     s_last_flip_idx = -1;
+    s_prev_flip_idx = -1;
     s_flip_logged = 0;
     s_flip_wait_logs = 0;
     s_flip_mode = ML_VIDEO_OUT_FLIP_VSYNC;
@@ -408,6 +412,7 @@ static int switch_to_bgra(int w, int h) {
         return -1;
     }
     s_last_flip_idx = 0;
+    s_prev_flip_idx = -1;
     nv12_blit_init();
     bgra_worker_start();
     LOGI("present_mode=BGRA (fallback) plugin=%s buf_h=%d n=%d wb=%d convert=sse2_mt",
@@ -1031,6 +1036,7 @@ int video_present_init(int w, int h, int prefer_ycbcr) {
     s_use_bgra = 0;
     s_fb_index = 0;
     s_last_flip_idx = -1;
+    s_prev_flip_idx = -1;
     s_flip_logged = 0;
     s_flip_wait_logs = 0;
     s_flip_mode = ML_VIDEO_OUT_FLIP_VSYNC;
@@ -1053,6 +1059,7 @@ int video_present_init(int w, int h, int prefer_ycbcr) {
         return 0;
     }
     s_last_flip_idx = 0;
+    s_prev_flip_idx = -1;
     s_fb_index = 0;
 
     nv12_blit_init();
@@ -1082,6 +1089,7 @@ bgra_debug:
     s_use_bgra = 1;
     s_fb_index = 0;
     s_last_flip_idx = -1;
+    s_prev_flip_idx = -1;
     s_flip_logged = 0;
     s_flip_wait_logs = 0;
     s_flip_mode = ML_VIDEO_OUT_FLIP_VSYNC;
@@ -1093,6 +1101,7 @@ bgra_debug:
     sceGnmFlushGarlic();
     (void)probe_submit_flip(0);
     s_last_flip_idx = 0;
+    s_prev_flip_idx = -1;
     s_fb_index = 0;
     nv12_blit_init();
     bgra_resolve_store_mode();
@@ -1151,6 +1160,8 @@ static int pick_free_fb(int *out_shown) {
             if (shown >= 0 && cand == shown)
                 continue;
             if (st0.numFlipPending > 0 && cand == s_last_flip_idx)
+                continue;
+            if (st0.numFlipPending > 1 && cand == s_prev_flip_idx)
                 continue;
             if (s_pipe_active && cand == s_pipe_fb_idx)
                 continue;
@@ -1259,6 +1270,7 @@ static void present_submit_flip(int next, uint8_t *dst, uint64_t convert_us) {
     uint64_t t1 = now_us();
     int32_t flip_rc = sceVideoOutSubmitFlip(s_video, next, (uint32_t)s_flip_mode, 0);
     s_fb_index = next;
+    s_prev_flip_idx = s_last_flip_idx;
     s_last_flip_idx = next;
 
     int shown_ok = 1;
@@ -1498,6 +1510,8 @@ static int ui_wait_backbuffer(int timeout_ms) {
                 continue;
             if (st.numFlipPending > 0 && cand == s_last_flip_idx)
                 continue;
+            if (st.numFlipPending > 1 && cand == s_prev_flip_idx)
+                continue;
             return cand;
         }
         sceKernelUsleep(1000);
@@ -1528,6 +1542,7 @@ int video_ui_flip(int idx) {
         rc = sceVideoOutSubmitFlip(s_video, idx, (uint32_t)s_flip_mode, 0);
     if (rc == 0) {
         s_fb_index = idx;
+        s_prev_flip_idx = s_last_flip_idx;
         s_last_flip_idx = idx;
     }
     return rc;
